@@ -1,6 +1,6 @@
 {
   "name": "@rvagg/car-to-schema",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Read a CAR file and describe its blocks using IPLD Schemas",
   "main": "car-to-schema.js",
   "type": "module",
