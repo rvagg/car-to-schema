@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import fs from 'fs'
+import path from 'path'
+import minimist from 'minimist'
 import { CarIterator } from '@ipld/car'
 import * as dagCbor from '@ipld/dag-cbor'
 import * as dagPb from '@ipld/dag-json'
@@ -16,8 +18,11 @@ import { bytes } from 'multiformats'
 const { toHex } = bytes
 const textEncoder = new TextEncoder()
 
-if (!process.argv[2]) {
-  console.log('Usage: car-to-schema.js <path/to/car>')
+const args = minimist(process.argv.slice(2))
+const outputDir = args.output
+
+if (!args._[0] || args._.length !== 1 || !outputDir) {
+  console.log('Usage: car-to-schema.js <path/to/car> --output <dir>')
   process.exit(1)
 }
 
@@ -49,7 +54,7 @@ async function run () {
   const schemas = {}
   let schemaCount = 0
 
-  const inStream = fs.createReadStream(process.argv[2])
+  const inStream = fs.createReadStream(args._[0])
   const reader = await CarIterator.fromIterable(inStream)
   let count = 0
   for await (const { cid, bytes } of reader.blocks()) {
@@ -60,8 +65,8 @@ async function run () {
     const schemaDigest = toHex((await sha256.digest(textEncoder.encode(JSON.stringify(description)))).bytes)
     if (!schemas[schemaDigest]) {
       schemas[schemaDigest] = { id: ++schemaCount, count: 1, description }
-      const jsonFile = `schema_${schemaCount}.json`
-      const ipldschFile = `schema_${schemaCount}.ipldsch`
+      const jsonFile = path.join(outputDir, `schema_${schemaCount}.json`)
+      const ipldschFile = path.join(outputDir, `schema_${schemaCount}.ipldsch`)
       console.log(`\n${chalk.bold(`Schema #${schemaCount}`)} (${jsonFile}, ${ipldschFile}):`)
       console.log(schemaPrint(description.schema, '  ', highlighter))
       console.log(`\n${chalk.bold('Root: ' + description.root)}`)
@@ -86,7 +91,10 @@ async function run () {
 
   const schemaList = Object.values(schemas)
   schemaList.sort((a, b) => a.id < b.id ? -1 : 1)
-  await fs.promises.writeFile('schema_summary.csv', schemaList.map((s) => `${s.id}, ${s.count}`).join('\n') + '\n', 'utf8')
+  await fs.promises.writeFile(
+    path.join(outputDir, 'schema_summary.csv'),
+    schemaList.map((s) => `${s.id}, ${s.count}`).join('\n') + '\n',
+  'utf8')
 
   console.log(`\nProcessed ${count} blocks, found ${schemaList.length} schemas, summary written to 'schema_summary.csv'`)
 }
