@@ -1,0 +1,10 @@
+type PBNode struct {
+  Links [PBLink]
+  Data optional Bytes
+}
+
+type PBLink struct {
+  Hash Link
+  Name optional String
+  Tsize optional Int
+}

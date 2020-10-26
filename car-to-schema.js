@@ -10,6 +10,8 @@ import * as dagJson from '@ipld/dag-pb'
 import * as raw from 'multiformats/codecs/raw'
 import * as json from 'multiformats/codecs/json'
 import SchemaDescriber from 'ipld-schema-describer'
+import SchemaValidator from 'ipld-schema-validator'
+import Schema from 'ipld-schema'
 import schemaPrint from 'ipld-schema/print.js'
 import chalk from 'chalk'
 import { sha256 } from 'multiformats/hashes/sha2'
@@ -20,9 +22,10 @@ const textEncoder = new TextEncoder()
 
 const args = minimist(process.argv.slice(2))
 const outputDir = args.output
+const libraryDir = args.library
 
 if (!args._[0] || args._.length !== 1 || !outputDir) {
-  console.log('Usage: car-to-schema.js <path/to/car> --output <dir>')
+  console.log('Usage: car-to-schema <path-to-CAR-file> --output=<output/dir> [--library=<schema/library/dir>]')
   process.exit(1)
 }
 
@@ -50,21 +53,57 @@ function decode (cid, bytes) {
   return decoders[cid.code](bytes)
 }
 
+async function loadLibrary () {
+  const library = []
+  if (!libraryDir) {
+    return library
+  }
+
+  const schemaFiles = await fs.promises.readdir(libraryDir)
+  for (const schemaFile of schemaFiles) {
+    const schemaName = schemaFile.replace(/\.(json|ipldsch)$/, '')
+    const type = schemaFile.replace(/^.+\.(json|ipldsch)$/, '$1')
+    let schema
+    if (type === 'json') {
+      const schemaJson = await fs.promises.readFile(path.join(libraryDir, schemaFile), 'utf8')
+      schema = JSON.parse(schemaJson)
+    } else if (type === 'ipldsch') {
+      const schemaDefn = await fs.promises.readFile(path.join(libraryDir, schemaFile), 'utf8')
+      schema = Schema.parse(schemaDefn)
+    } else { // ignore, that's ok
+      continue
+    }
+    const validator = SchemaValidator.create(schema, schemaName)
+    library[schemaName] = validator
+  }
+
+  return library
+}
+
 async function run () {
-  const schemas = {}
+  const describedSchemas = {}
+  const librarySchemas = {}
   let schemaCount = 0
 
-  const inStream = fs.createReadStream(args._[0])
-  const reader = await CarIterator.fromIterable(inStream)
-  let count = 0
-  for await (const { cid, bytes } of reader.blocks()) {
-    const obj = decode(cid, bytes)
-    // console.log(obj) //, { depth: Infinity })
+  const checkLibrarySchema = (obj) => {
+    for (const [name, validator] of library) {
+      if (validator(obj)) {
+        if (!librarySchemas[name]) {
+          librarySchemas[name] = { id: name, count: 1 }
+        } else {
+          librarySchemas[name].count++
+        }
+        return true
+      }
+    }
+    return false
+  }
+
+  const describeSchema = async (obj) => {
     const description = SchemaDescriber.describe(obj)
-    // console.dir({ schema, root }, { depth: Infinity })
     const schemaDigest = toHex((await sha256.digest(textEncoder.encode(JSON.stringify(description)))).bytes)
-    if (!schemas[schemaDigest]) {
-      schemas[schemaDigest] = { id: ++schemaCount, count: 1, description }
+    if (!describedSchemas[schemaDigest]) {
+      describedSchemas[schemaDigest] = { id: ++schemaCount, count: 1, description }
       const jsonFile = path.join(outputDir, `schema_${schemaCount}.json`)
       const ipldschFile = path.join(outputDir, `schema_${schemaCount}.ipldsch`)
       console.log(`\n${chalk.bold(`Schema #${schemaCount}`)} (${jsonFile}, ${ipldschFile}):`)
@@ -75,28 +114,40 @@ async function run () {
         fs.promises.writeFile(ipldschFile, schemaPrint(description.schema) + '\n', 'utf8')
       ])
     } else {
-      schemas[schemaDigest].count++
+      describedSchemas[schemaDigest].count++
+    }
+  }
+
+  const library = Object.entries(await loadLibrary())
+  const inStream = fs.createReadStream(args._[0])
+  const reader = await CarIterator.fromIterable(inStream)
+  let count = 0
+  for await (const { cid, bytes } of reader.blocks()) {
+    const obj = decode(cid, bytes)
+    if (!checkLibrarySchema(obj)) {
+      await describeSchema(obj)
     }
 
     if (count++ % 100 === 0) {
       process.stdout.write('.')
     }
 
-    /*
     if (count >= 30000) {
       break
     }
-    */
   }
 
-  const schemaList = Object.values(schemas)
-  schemaList.sort((a, b) => a.id < b.id ? -1 : 1)
+  const librarySchemaList = Object.values(librarySchemas)
+  librarySchemaList.sort((a, b) => a.id < b.id ? -1 : 1)
+  const describedSchemaList = Object.values(describedSchemas)
+  describedSchemaList.sort((a, b) => a.id < b.id ? -1 : 1)
+  const summaryFile = path.join(outputDir, 'schema_summary.csv')
   await fs.promises.writeFile(
-    path.join(outputDir, 'schema_summary.csv'),
-    schemaList.map((s) => `${s.id}, ${s.count}`).join('\n') + '\n',
-  'utf8')
+    summaryFile,
+    librarySchemaList.concat(describedSchemaList).map((s) => `${s.id}, ${s.count}`).join('\n') + '\n',
+    'utf8')
 
-  console.log(`\nProcessed ${count} blocks, found ${schemaList.length} schemas, summary written to 'schema_summary.csv'`)
+  console.log(`\nProcessed ${count} blocks, found ${describedSchemaList.length} novel schemas.\nWrote summary to '${summaryFile}'`)
 }
 
 run().catch((err) => {
