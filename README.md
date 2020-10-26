@@ -20,7 +20,13 @@ Unqiue found schemas will be printed to stdout as well as written to files in th
 
 ## Limitations
 
-Currently only [DAG-CBOR](https://specs.ipld.io/block-layer/codecs/dag-cbor.html) format blocks inside a CAR are supported. More codecs may be added as needed.
+Currently only supports the following codecs for blocks:
+
+* DAG-CBOR
+* DAG-JSON
+* DAG-PB
+* raw
+* json
 
 See also the [Limitations section of **ipld-schema-describer**](https://github.com/rvagg/js-ipld-schema-describer#limitations) for the limitations of Schema inference on objects.
 

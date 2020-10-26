@@ -5,12 +5,16 @@
   "main": "car-to-schema.js",
   "type": "module",
   "scripts": {},
-  "bin": "./car-to-schema.js",
+  "bin": {
+    "car-to-schema": "car-to-schema.js"
+  },
   "author": "Rod <rod@vagg.org> (http://r.va.gg/)",
   "license": "Apache-2.0",
   "dependencies": {
     "@ipld/car": "github:ipld/js-datastore-car#rvagg/storage-iface",
     "@ipld/dag-cbor": "^2.0.2",
+    "@ipld/dag-json": "^4.0.0",
+    "@ipld/dag-pb": "^0.0.1",
     "chalk": "^4.1.0",
     "ipld-schema": "^0.4.0",
     "ipld-schema-describer": "^0.0.0",

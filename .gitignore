@@ -1,2 +1,5 @@
 node_modules/
 filecoin/
+schema_*.json
+schema_*.ipldsch
+schema_summary.csv

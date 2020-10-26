@@ -3,6 +3,10 @@
 import fs from 'fs'
 import { CarIterator } from '@ipld/car'
 import * as dagCbor from '@ipld/dag-cbor'
+import * as dagPb from '@ipld/dag-json'
+import * as dagJson from '@ipld/dag-pb'
+import * as raw from 'multiformats/codecs/raw'
+import * as json from 'multiformats/codecs/json'
 import SchemaDescriber from 'ipld-schema-describer'
 import schemaPrint from 'ipld-schema/print.js'
 import chalk from 'chalk'
@@ -26,15 +30,30 @@ const highlighter = {
   punctuation: (s) => chalk.blackBright(s)
 }
 
-const schemas = {}
-let schemaCount = 0
+const decoders = {
+  [dagCbor.code]: dagCbor.decode,
+  [dagPb.code]: dagPb.decode,
+  [dagJson.code]: dagJson.decode,
+  [raw.code]: raw.decode,
+  [json.code]: json.decode
+}
+
+function decode (cid, bytes) {
+  if (typeof decoders[cid.code] !== 'function') {
+    throw new Error(`Unknown codec code: 0x${cid.code.toString(16)}`)
+  }
+  return decoders[cid.code](bytes)
+}
 
 async function run () {
+  const schemas = {}
+  let schemaCount = 0
+
   const inStream = fs.createReadStream(process.argv[2])
   const reader = await CarIterator.fromIterable(inStream)
   let count = 0
-  for await (const { bytes } of reader.blocks()) {
-    const obj = dagCbor.decode(bytes)
+  for await (const { cid, bytes } of reader.blocks()) {
+    const obj = decode(cid, bytes)
     // console.log(obj) //, { depth: Infinity })
     const description = SchemaDescriber.describe(obj)
     // console.dir({ schema, root }, { depth: Infinity })
