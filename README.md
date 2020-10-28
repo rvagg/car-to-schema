@@ -13,10 +13,15 @@ $ npm install @rvagg/car-to-schema -g
 ### Run
 
 ```sh
-$ car-to-schema <path-to-CAR-file> --output=<output/dir> [--library=<schema/library/dir>]
+$ car-to-schema <path-to-CAR-file> --output=<output/dir>
 ```
 
-Unqiue found schemas will be printed to stdout as well as written to files in the current working directory named `schema_X.ipldsch` (the human-readable text form) and `schema_X.json` (the JSON object descriptor form), where `X` is the unique schema number. A `schema_summary.csv` will also be written with a mapping of the schema to the number of blocks found matching that schema.
+Unqiue found schemas will be printed to stdout as well as written to files in the current working directory named `schema_X.ipldsch` (the human-readable text form), where `X` is the unique schema number. A `schema_summary.csv` will also be written with a mapping of the schema to the number of blocks found matching that schema.
+
+**Options**:
+
+ * `--library=<schema/library/dir>` - provide a path to a directory containing an existing library of schemas, see below.
+ * `--novel-out=<path/to/out.car>` - write out a new car containin _only_ blocks that don't match schemas in the library. This can be used when authoring the library of schemas and you are narrowing down to just the blocks that are not recognised.
 
 ### Library
 

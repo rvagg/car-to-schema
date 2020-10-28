@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
+import { Readable } from 'stream'
 import fs from 'fs'
 import path from 'path'
 import minimist from 'minimist'
-import { CarIterator } from '@ipld/car'
+import { CarIterator, CarWriter } from '@ipld/car'
 import * as dagCbor from '@ipld/dag-cbor'
-import * as dagPb from '@ipld/dag-json'
-import * as dagJson from '@ipld/dag-pb'
+import * as dagPb from '@ipld/dag-pb'
+import * as dagJson from '@ipld/dag-json'
 import * as raw from 'multiformats/codecs/raw'
 import * as json from 'multiformats/codecs/json'
 import SchemaDescriber from 'ipld-schema-describer'
@@ -85,13 +86,14 @@ async function run () {
   const librarySchemas = {}
   let schemaCount = 0
 
-  const checkLibrarySchema = (obj) => {
+  const checkLibrarySchema = (obj, byteLength, cid) => {
     for (const [name, validator] of library) {
       if (validator(obj)) {
         if (!librarySchemas[name]) {
-          librarySchemas[name] = { id: name, count: 1 }
+          librarySchemas[name] = { id: name, count: 1, sizes: [byteLength] }
         } else {
           librarySchemas[name].count++
+          librarySchemas[name].sizes.push(byteLength)
         }
         return true
       }
@@ -99,42 +101,57 @@ async function run () {
     return false
   }
 
-  const describeSchema = async (obj) => {
+  const describeSchema = async (obj, byteLength) => {
     const description = SchemaDescriber.describe(obj)
     const schemaDigest = toHex((await sha256.digest(textEncoder.encode(JSON.stringify(description)))).bytes)
     if (!describedSchemas[schemaDigest]) {
-      describedSchemas[schemaDigest] = { id: ++schemaCount, count: 1, description }
-      const jsonFile = path.join(outputDir, `schema_${schemaCount}.json`)
+      describedSchemas[schemaDigest] = { id: ++schemaCount, count: 1, description, sizes: [byteLength] }
       const ipldschFile = path.join(outputDir, `schema_${schemaCount}.ipldsch`)
-      console.log(`\n${chalk.bold(`Schema #${schemaCount}`)} (${jsonFile}, ${ipldschFile}):`)
+      console.log(`\n${chalk.bold(`Schema #${schemaCount}`)} (${ipldschFile}):`)
       console.log(schemaPrint(description.schema, '  ', highlighter))
       console.log(`\n${chalk.bold('Root: ' + description.root)}`)
-      await Promise.all([
-        fs.promises.writeFile(jsonFile, JSON.stringify(description.schema, null, 2) + '\n', 'utf8'),
-        fs.promises.writeFile(ipldschFile, schemaPrint(description.schema) + '\n', 'utf8')
-      ])
+      await fs.promises.writeFile(ipldschFile, schemaPrint(description.schema) + '\n', 'utf8')
+      return true
     } else {
       describedSchemas[schemaDigest].count++
+      describedSchemas[schemaDigest].sizes.push(byteLength)
+      return false
     }
   }
 
   const library = Object.entries(await loadLibrary())
+  library.sort((a, b) => a[0] < b[0] ? -1 : 1)
   const inStream = fs.createReadStream(args._[0])
   const reader = await CarIterator.fromIterable(inStream)
+  let writer = null
+  if (args['novel-out']) {
+    const outStream = fs.createWriteStream(args['novel-out'])
+    writer = await CarWriter.create([])
+    Readable.from(writer).pipe(outStream)
+  }
   let count = 0
   for await (const { cid, bytes } of reader.blocks()) {
     const obj = decode(cid, bytes)
-    if (!checkLibrarySchema(obj)) {
-      await describeSchema(obj)
+    if (!checkLibrarySchema(obj, bytes.length, cid)) {
+      await describeSchema(obj, bytes.length)
+      if (writer) {
+        await writer.put({ cid, bytes })
+      }
     }
 
     if (count++ % 100 === 0) {
       process.stdout.write('.')
     }
 
-    if (count >= 30000) {
+    /*
+    if (count >= 500000) {
       break
     }
+    */
+  }
+
+  if (writer) {
+    await writer.close()
   }
 
   const librarySchemaList = Object.values(librarySchemas)
@@ -144,7 +161,12 @@ async function run () {
   const summaryFile = path.join(outputDir, 'schema_summary.csv')
   await fs.promises.writeFile(
     summaryFile,
-    librarySchemaList.concat(describedSchemaList).map((s) => `${s.id}, ${s.count}`).join('\n') + '\n',
+    librarySchemaList.concat(describedSchemaList)
+      .map((s) => {
+        s.average = s.sizes.reduce((p, c) => p + c, 0) / s.sizes.length
+        return s
+      })
+      .map((s) => `${s.id}, ${s.count}, ${Math.round(s.average)}`).join('\n') + '\n',
     'utf8')
 
   console.log(`\nProcessed ${count} blocks, found ${describedSchemaList.length} novel schemas.\nWrote summary to '${summaryFile}'`)
